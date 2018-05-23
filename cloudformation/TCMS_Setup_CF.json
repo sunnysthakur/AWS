@@ -1,0 +1,298 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Create an EC2 instance running RHEL7x64 with a new EBS volume attached. ",
+
+  "Parameters" : {
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 Keypair to enable SSH access into the server",
+      "Type" : "String"
+    },
+    "InstanceType" : {
+      "Description" : "The type of EC2 instance to launch",
+      "Type" : "String",
+      "Default" : "t2.micro"
+    },
+    "VolumeSize" : {
+      "Description" : "The size of the EBS volume to attach",
+      "Type" : "Number",
+      "Default" : "10"
+    },
+    "SSHLocation": {
+      "Description": "The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+   },
+   
+    "WebInstanceName" : {
+      "Description" : "Name of TCMS in Webroot",
+      "Type" : "String",
+      "Default" : ""       
+   },
+ 
+    "DBRootPassword": {
+      "NoEcho": "true",
+      "Description": "MySQL root password",
+      "Type": "String",
+      "MinLength": "8",
+      "MaxLength": "41",
+      "AllowedPattern": "[a-zA-Z0-9]*",
+      "ConstraintDescription": "must contain only alphanumeric characters."
+        },
+    
+    "InstanceDBName": {
+       "Default": "mysql",
+       "Description": "The TCMS instance database name for connection test",
+       "Type": "String",
+       "ConstraintDescription": "must begin with a letter and contain only alphanumeric characters."
+        }
+},
+  "Mappings" : {
+    "AWSInstanceType2Arch" : {
+      "t2.micro" : {"Arch" : "64" },
+      "t2.small" : {"Arch" : "32" }
+    },
+    "AWSRegionArch2AMI" : {
+      "ap-southeast-1" : {"32" : "ami-16f2b944", "64" : "ami-51c4b82d"}
+    }
+  },
+  
+  "Resources" : {
+        "DEMOSG": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupName": "DEMOSG",
+                "GroupDescription": "Enable HTTP/HTTPS access via port 80/443 + SSH access",
+                "VpcId": {"Fn::ImportValue": "Network-VpcId"},
+                "SecurityGroupIngress": [
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "80",
+                        "ToPort": "80",
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "443",
+                        "ToPort": "443",
+                        "CidrIp": "0.0.0.0/0"
+                    },
+                    {
+                        "IpProtocol": "tcp",
+                        "FromPort": "22",
+                        "ToPort": "22",
+                        "CidrIp": {
+                            "Ref": "SSHLocation"
+                        }
+                    }
+                ]
+            }
+        },
+    "Ec2Instance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Metadata" : {
+      "Comment1" : "Install, Setup and Configure LAMP",
+      "Comment2" : "Setup TCMS server on LAMP environment",
+                "AWS::CloudFormation::Init" : {
+                    "configSets" : {
+                        "Install" : [ "Install", "Configure" ]
+                     },
+                    "Install" : {
+                        "packages" : {
+                            
+                             "yum" : {
+                                "mariadb-server" : [],
+                                "mariadb"      : [],
+                                "httpd"        : [],
+                                "php"          : [],
+                                "php-mysql"    : [],
+                                "php-gd"       : [], 
+                                "awslogs"      : [] 
+                             }
+                        },
+                         "files" : {
+				"/etc/php.ini": {
+					"content": { "Fn::Join": [ "", [
+                                                "[PHP]\n",
+
+                                                "; Enable the PHP scripting language engine under Apache.\n",
+                                                "engine = On\n",
+
+                                                "; This directive determines whether or not PHP will recognize code between\n",
+                                                "; <? and ?> tags as PHP source which should be processed as such.\n",
+                                                "; Default Value: On\n",
+                                                "; Development Value: Off\n",
+                                                "; Production Value: Off\n",
+                                                "short_open_tag = Off\n",
+
+                                                "; Allow ASP-style <% %> tags.\n",
+                                                "asp_tags = Off\n",
+
+                                                "; The number of significant digits displayed in floating point numbers.\n",
+                                                "precision = 14\n",
+
+                                                "; Output buffering is a mechanism for controlling how much output data\n",
+                                                "; (excluding headers and cookies) PHP should keep internally before pushing that\n",
+                                                "; data to the client.\n",
+                                                "output_buffering = 4096\n",
+
+                                                "; Transparent output compression using the zlib library\n",
+                                                "zlib.output_compression = Off\n",
+
+                                                "; Implicit flush tells PHP to tell the output layer to flush itself\n",
+                                                "; automatically after every output block.\n",
+                                                "implicit_flush = Off\n",
+
+                                                "; The unserialize callback function will be called (with the undefined class'\n",
+                                                "; name as parameter), if the unserializer finds an undefined class\n",
+                                                "; which should be instantiated.\n",
+                                                "unserialize_callback_func = \n",
+
+                                                "; When floats & doubles are serialized store serialize_precision significant\n",
+                                                "; digits after the floating point.\n",
+                                                "serialize_precision = 17\n",
+
+                                                "; This directive allows you to disable certain functions for security reasons.\n",
+                                                "; It receives a comma-delimited list of function names.\n",
+                                                "disable_functions = \n",
+
+                                                "; This directive allows you to disable certain classes for security reasons.\n",
+                                                "disable_classes = \n",
+
+                                                "; Enables or disables the circular reference collector.\n",
+                                                "zend.enable_gc = On\n",
+
+                                                "; Decides whether PHP may expose the fact that it is installed on the server\n",
+                                                "; (e.g. by adding its signature to the Web server header).\n",
+                                                "expose_php = On \n",
+
+                                                "; Maximum execution time of each script, in seconds\n",
+                                                "max_execution_time = 120\n",
+
+                                                "; Maximum amount of time each script may spend parsing request data.\n",
+                                                "max_input_time = 60\n",
+
+                                                "; Maximum amount of memory a script may consume (128MB)\n",
+                                                "memory_limit = 128M\n",
+
+                                                "; Default Value: E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED\n",
+                                                "error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT\n",
+
+                                                "; This directive controls whether or not and where PHP will output errors,\n",
+                                                "; notices and warnings too.\n",
+                                                "display_errors = Off\n",
+
+                                                "; The display of errors which occur during PHP's startup sequence are handled\n",
+                                                "; separately from display_errors.\n",
+                                                "display_startup_errors = Off\n",
+                                            
+                                                "; After this number of seconds, stored data will be seen as 'garbage' and\n",
+                                                "; cleaned up by the garbage collection process.\n",
+                                                "session.gc_maxlifetime = 3000\n"
+					] ] },
+    					"mode": "000444",
+					"owner": "root",
+					"group": "root"
+				}
+                        },
+                       "services" : {
+                         "sysvinit" : {  
+                            "httpd"   : { "enabled" : "true", "ensureRunning" : "true" },
+                            "mariadb"   : { "enabled" : "true", "ensureRunning" : "true" }        
+              }
+            }
+          },
+            "Configure" : {
+              "commands" : {
+                "01_set_mysql_root_password" : {
+                  "command" : { "Fn::Join" : ["", ["mysqladmin -u root password '", { "Ref" : "DBRootPassword" }, "'"]]},
+                  "test" : { "Fn::Join" : ["", ["$(mysql ", { "Ref" : "InstanceDBName" }, " -u root --password='", { "Ref" : "DBRootPassword" }, "' >/dev/null 2>&1 </dev/null); (( $? != 0 ))"]]}              
+              }
+            }
+          }
+        }
+      },
+        "Properties" : {
+          "ImageId" :   { "Fn::FindInMap" : [ "AWSRegionArch2AMI", { "Ref" : "AWS::Region" }, 
+                      { "Fn::FindInMap" : [ "AWSInstanceType2Arch", {"Ref" : "InstanceType"}, "Arch"] } ] },
+          "InstanceType" : {"Ref" : "InstanceType" },
+          "KeyName" : {"Ref" : "KeyName" },
+          "NetworkInterfaces" : [{
+                 "AssociatePublicIpAddress" : "True",
+                 "DeleteOnTermination" : "True",
+                 "DeviceIndex" : "0",
+                 "SubnetId": {"Fn::ImportValue": "SN-SubnetIDPub"},
+                 "GroupSet" : [ { "Ref" : "DEMOSG" } ]
+              }],
+        
+        "Tags" : [
+          { 
+            "Key" : "Name",
+            "Value" : {"Ref" : "AWS::StackName"} 
+          }
+        ],
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+             "#!/bin/bash -xe\n",
+             "yum install -y aws-cfn-bootstrap\n",
+                                
+             "#install Epel repo on instance\n",
+             "rpm -ivh http://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm\n",
+         
+             "# Install the files and packages from the metadata\n",
+             "/opt/aws/bin/cfn-init -v ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource Ec2Instance ",
+             "         --configsets Install ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+             
+             "#Copy tar file from S3 to EC2 instance\n",
+             "aws s3 cp s3://qasawscf/metadata/tcms.tar /var/www/html \n",
+                                
+             "#un tar the compressed file\n",                   
+             "tar xvf /var/www/html/tcms.tar -C /var/www/html/ \n",
+                                
+             "#Move folder name to exact Project name \n",
+             "mv /var/www/html/tcms/ /var/www/html/", {"Ref" : "WebInstanceName"}, "\n",
+                          
+             "#Remove tar file from webroot \n",
+             "rm -f /var/www/html/tcms.tar \n"
+            ]]}}
+        }
+      },
+    "Volume1" : {
+      "Type" : "AWS::EC2::Volume",
+      "Properties" : {
+        "Size" : "10",
+        "AvailabilityZone" : { "Fn::GetAtt" : [ "Ec2Instance", "AvailabilityZone" ]},
+        "Tags" : [
+          { 
+            "Key" : "Name",
+            "Value" : {"Ref" : "AWS::StackName"} 
+          }
+        ]
+      }
+    },
+    "MountPoint" : {
+      "Type" : "AWS::EC2::VolumeAttachment",
+      "Properties" : {
+        "InstanceId" : {"Ref" : "Ec2Instance"},
+        "VolumeId" : {"Ref" : "Volume1"},
+        "Device" : "/dev/sdh"
+     }
+    }
+   },
+  "Outputs" : {
+    "WebsiteURL" : {
+      "Description" : "URL for newly created stack",
+      "Value" : { "Fn::Join" : ["", ["http://", { "Fn::GetAtt" : [ "Ec2Instance", "PublicDnsName"]}, "/", {"Ref" : "WebInstanceName"}, "/install" ]] }
+    },
+   "ServerDNS" : {
+      "Description" : "DNS name of launched server",
+      "Value" : { "Fn::GetAtt" : [ "Ec2Instance", "PublicDnsName" ] }
+    }
+  }
+ }
